@@ -2,7 +2,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -12,7 +11,7 @@ fun adId(name: String, demo: String): String =
 
 android {
     namespace = "com.pixli.imageresizer"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.pixli.imageresizer"

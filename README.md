@@ -50,6 +50,6 @@ If you lose it you cannot update the app on Google Play.
 ## Notes
 
 - `versionCode` = GitHub run number, so every CI build has a higher code automatically.
-- The workflow uses Gradle 8.14.3 directly (no wrapper files needed). To add a wrapper:
-  `gradle wrapper --gradle-version 8.14.3`
+- The workflow uses Gradle 9.3.1 directly (no wrapper files needed). To add a wrapper:
+  `gradle wrapper --gradle-version 9.3.1`
 - Play Store icon (512×512): `store/play_store_icon_512.png`
