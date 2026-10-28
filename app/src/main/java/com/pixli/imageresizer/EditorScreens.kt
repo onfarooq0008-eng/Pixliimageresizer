@@ -310,8 +310,8 @@ fun BatchScreen(vm: MainViewModel) {
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Bar("Batch Process") { vm.pop() }
         TabRow(selectedTabIndex = if (resize) 1 else 0, containerColor = Color.White) {
-            Tab(selected = !resize, onClick = { vm.setBatchTab(Mode.COMPRESS) }, text = { Text("Compress") })
-            Tab(selected = resize, onClick = { vm.setBatchTab(Mode.RESIZE) }, text = { Text("Resize") })
+            Tab(selected = !resize, onClick = { vm.updateBatchTab(Mode.COMPRESS) }, text = { Text("Compress") })
+            Tab(selected = resize, onClick = { vm.updateBatchTab(Mode.RESIZE) }, text = { Text("Resize") })
         }
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${vm.images.size} images selected", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))

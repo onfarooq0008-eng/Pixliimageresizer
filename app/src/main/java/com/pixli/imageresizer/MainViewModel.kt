@@ -38,11 +38,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var keepDate by mutableStateOf(sp.getBoolean("keepDate", true)); private set
     var showSize by mutableStateOf(sp.getBoolean("showSize", true)); private set
 
-    fun setFormat(v: OutFormat) { format = v; sp.edit().putString("format", v.name).apply() }
-    fun setDefaultQuality(v: Int) { defaultQuality = v; sp.edit().putInt("quality", v).apply() }
-    fun setDefaultSize(v: SizePreset) { defaultSize = v; sp.edit().putString("size", v.name).apply() }
-    fun setKeepDate(v: Boolean) { keepDate = v; sp.edit().putBoolean("keepDate", v).apply() }
-    fun setShowSize(v: Boolean) { showSize = v; sp.edit().putBoolean("showSize", v).apply() }
+    fun updateFormat(v: OutFormat) { format = v; sp.edit().putString("format", v.name).apply() }
+    fun updateDefaultQuality(v: Int) { defaultQuality = v; sp.edit().putInt("quality", v).apply() }
+    fun updateDefaultSize(v: SizePreset) { defaultSize = v; sp.edit().putString("size", v.name).apply() }
+    fun updateKeepDate(v: Boolean) { keepDate = v; sp.edit().putBoolean("keepDate", v).apply() }
+    fun updateShowSize(v: Boolean) { showSize = v; sp.edit().putBoolean("showSize", v).apply() }
 
     // ---- shared UI state ----
     var message by mutableStateOf<String?>(null)
@@ -156,7 +156,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         batchSaved = false
     }
 
-    fun setBatchTab(m: Mode) { batchTab = m; batchResults.clear(); batchSaved = false }
+    fun updateBatchTab(m: Mode) { batchTab = m; batchResults.clear(); batchSaved = false }
 
     fun runBatch(resize: Boolean, quality: Int, preset: SizePreset) {
         val idx = images.indices.filter { batchChecked.getOrElse(it) { false } }

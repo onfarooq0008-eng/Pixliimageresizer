@@ -66,9 +66,9 @@ fun SettingsScreen(vm: MainViewModel) {
                 HorizontalDivider(color = Line)
                 NavRow(Icons.Filled.FolderOpen, "Save Location", "Pictures/${ImageProcessor.FOLDER}", chevron = false) {}
                 HorizontalDivider(color = Line)
-                SwitchRow(Icons.Filled.CalendarMonth, "Keep Original Date", vm.keepDate) { vm.setKeepDate(it) }
+                SwitchRow(Icons.Filled.CalendarMonth, "Keep Original Date", vm.keepDate) { vm.updateKeepDate(it) }
                 HorizontalDivider(color = Line)
-                SwitchRow(Icons.Filled.Storage, "Show File Size", vm.showSize) { vm.setShowSize(it) }
+                SwitchRow(Icons.Filled.Storage, "Show File Size", vm.showSize) { vm.updateShowSize(it) }
                 HorizontalDivider(color = Line)
                 NavRow(Icons.Filled.Info, "About App", null) { dialog = Dialog.ABOUT }
                 HorizontalDivider(color = Line)
@@ -86,8 +86,8 @@ fun SettingsScreen(vm: MainViewModel) {
             text = {
                 Column {
                     OutFormat.entries.forEach { f ->
-                        Row(Modifier.fillMaxWidth().clickable { vm.setFormat(f); dialog = Dialog.NONE }, verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = vm.format == f, onClick = { vm.setFormat(f); dialog = Dialog.NONE })
+                        Row(Modifier.fillMaxWidth().clickable { vm.updateFormat(f); dialog = Dialog.NONE }, verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = vm.format == f, onClick = { vm.updateFormat(f); dialog = Dialog.NONE })
                             Text(f.label)
                         }
                     }
@@ -101,7 +101,7 @@ fun SettingsScreen(vm: MainViewModel) {
                 onDismissRequest = { dialog = Dialog.NONE },
                 title = { Text("Compression Quality: $q%") },
                 text = { Slider(value = q.toFloat(), onValueChange = { q = it.roundToInt() }, valueRange = 10f..100f) },
-                confirmButton = { TextButton(onClick = { vm.setDefaultQuality(q); dialog = Dialog.NONE }) { Text("Save") } },
+                confirmButton = { TextButton(onClick = { vm.updateDefaultQuality(q); dialog = Dialog.NONE }) { Text("Save") } },
                 dismissButton = { TextButton(onClick = { dialog = Dialog.NONE }) { Text("Cancel") } }
             )
         }
@@ -111,8 +111,8 @@ fun SettingsScreen(vm: MainViewModel) {
             text = {
                 Column {
                     SizePreset.entries.forEach { p ->
-                        Row(Modifier.fillMaxWidth().clickable { vm.setDefaultSize(p); dialog = Dialog.NONE }, verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = vm.defaultSize == p, onClick = { vm.setDefaultSize(p); dialog = Dialog.NONE })
+                        Row(Modifier.fillMaxWidth().clickable { vm.updateDefaultSize(p); dialog = Dialog.NONE }, verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = vm.defaultSize == p, onClick = { vm.updateDefaultSize(p); dialog = Dialog.NONE })
                             Text("${p.label} ${p.hint}")
                         }
                     }
