@@ -1,0 +1,3 @@
+-dontwarn kotlin.**
+-dontwarn kotlinx.**
+-keep class androidx.exifinterface.** { *; }
