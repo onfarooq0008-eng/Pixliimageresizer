@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.yandex.mobile.ads.common.AdError
-import com.yandex.mobile.ads.common.AdRequestConfiguration
+import com.yandex.mobile.ads.common.AdRequest
 import com.yandex.mobile.ads.common.AdRequestError
 import com.yandex.mobile.ads.common.ImpressionData
 import com.yandex.mobile.ads.interstitial.InterstitialAd
@@ -28,7 +28,6 @@ import com.yandex.mobile.ads.interstitial.InterstitialAdLoader
 import com.yandex.mobile.ads.nativeads.NativeAd
 import com.yandex.mobile.ads.nativeads.NativeAdLoadListener
 import com.yandex.mobile.ads.nativeads.NativeAdLoader
-import com.yandex.mobile.ads.nativeads.NativeAdRequestConfiguration
 import com.yandex.mobile.ads.nativeads.NativeAdView
 import com.yandex.mobile.ads.nativeads.NativeAdViewBinder
 
@@ -40,11 +39,13 @@ fun NativeAdCard(modifier: Modifier = Modifier) {
     val loader = remember { NativeAdLoader(ctx) }
 
     LaunchedEffect(loader) {
-        loader.setNativeAdLoadListener(object : NativeAdLoadListener {
-            override fun onAdLoaded(nativeAd: NativeAd) { ad = nativeAd }
-            override fun onAdFailedToLoad(error: AdRequestError) { ad = null }
-        })
-        loader.loadAd(NativeAdRequestConfiguration.Builder(BuildConfig.NATIVE_ID).build())
+        loader.loadAd(
+            AdRequest.Builder(BuildConfig.NATIVE_ID).build(),
+            object : NativeAdLoadListener {
+                override fun onAdLoaded(nativeAd: NativeAd) { ad = nativeAd }
+                override fun onAdFailedToLoad(error: AdRequestError) { ad = null }
+            }
+        )
     }
 
     ad?.let { nativeAd ->
@@ -82,17 +83,18 @@ class InterstitialManager(context: Context) {
     private var ad: InterstitialAd? = null
     private var saves = 0
 
-    private val loader = InterstitialAdLoader(context).apply {
-        setAdLoadListener(object : InterstitialAdLoadListener {
-            override fun onAdLoaded(interstitialAd: InterstitialAd) { ad = interstitialAd }
-            override fun onAdFailedToLoad(adRequestError: AdRequestError) { ad = null }
-        })
-    }
+    private val loader = InterstitialAdLoader(context)
 
     init { load() }
 
     private fun load() {
-        loader.loadAd(AdRequestConfiguration.Builder(BuildConfig.INTERSTITIAL_ID).build())
+        loader.loadAd(
+            AdRequest.Builder(BuildConfig.INTERSTITIAL_ID).build(),
+            object : InterstitialAdLoadListener {
+                override fun onAdLoaded(interstitialAd: InterstitialAd) { ad = interstitialAd }
+                override fun onAdFailedToLoad(adRequestError: AdRequestError) { ad = null }
+            }
+        )
     }
 
     fun onSaved(activity: Activity) {
