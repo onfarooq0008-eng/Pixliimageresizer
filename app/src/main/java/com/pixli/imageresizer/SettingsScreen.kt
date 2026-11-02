@@ -128,15 +128,24 @@ fun SettingsScreen(vm: MainViewModel) {
         )
         Dialog.PRIVACY -> AlertDialog(
             onDismissRequest = { dialog = Dialog.NONE },
-            title = { Text("Privacy Policy") },
+            title = { Text("Privacy") },
             text = {
-                Text(
-                    "All compression and resizing happens on your device. Your images are never uploaded " +
-                        "and the app itself collects no personal data. Saved images go to " +
-                        "Pictures/${ImageProcessor.FOLDER} on your device.\n\n" +
-                        "The app shows ads through the Yandex Mobile Ads SDK, which may use device identifiers " +
-                        "such as the advertising ID to serve ads. See Yandex's privacy policy for details."
-                )
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Your images: Pixli compresses and resizes images entirely on your device. Pixli never uploads " +
+                            "your images, has no account system and has no analytics of its own. Processed images are " +
+                            "saved only to Pictures/${ImageProcessor.FOLDER} on your device or where you choose. " +
+                            "Location (GPS) and other metadata are not copied into processed images; only the original " +
+                            "date can be kept.\n\n" +
+                            "Photo access: Pixli reads only images you select, or your photo library if you allow it so " +
+                            "the picker grid can show your photos. You can use the system photo picker instead, which " +
+                            "needs no permission.\n\n" +
+                            "Advertising: Pixli shows ads through the Yandex Mobile Ads SDK. To load, show and measure ads " +
+                            "the SDK uses the internet and may collect and use device and advertising information " +
+                            "(for example the advertising ID, IP address and device and app details) according to " +
+                            "Yandex's own privacy policy. Pixli does not receive or control this data."
+                    )
+                }
             },
             confirmButton = { TextButton(onClick = { dialog = Dialog.NONE }) { Text("OK") } }
         )

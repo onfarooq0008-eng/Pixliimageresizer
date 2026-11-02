@@ -1,8 +1,5 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -12,7 +9,7 @@ fun adId(name: String, demo: String): String =
 
 android {
     namespace = "com.pixli.imageresizer"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.pixli.imageresizer"
@@ -63,10 +60,6 @@ android {
     }
 }
 
-kotlin {
-    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
-}
-
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -78,4 +71,6 @@ dependencies {
     implementation(libs.androidx.compose.icons.extended)
     implementation(libs.coil.compose)
     implementation(libs.yandex.mobileads)
+
+    testImplementation(libs.junit)
 }

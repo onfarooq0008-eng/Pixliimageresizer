@@ -1,9 +1,11 @@
 package com.pixli.imageresizer
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -42,7 +45,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -64,25 +66,49 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/**
+ * Photo permissions per Android version:
+ *  - 34+ : READ_MEDIA_IMAGES, or READ_MEDIA_VISUAL_USER_SELECTED when the user picks "Select photos" (partial access)
+ *  - 33  : READ_MEDIA_IMAGES
+ *  - 29-32: READ_EXTERNAL_STORAGE
+ * The grid is optional: the system photo picker and the file picker need no permission at all.
+ */
+private fun galleryPermissions(): Array<String> = when {
+    Build.VERSION.SDK_INT >= 34 ->
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+    else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
 @Composable
 fun SelectScreen(vm: MainViewModel, mode: Mode) {
     val ctx = LocalContext.current
-    val permission =
-        if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
-        else Manifest.permission.READ_EXTERNAL_STORAGE
+    val permissions = remember { galleryPermissions() }
+    fun hasAccess() = permissions.any { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
 
-    var granted by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED)
-    }
+    var granted by remember { mutableStateOf(hasAccess()) }
     var gallery by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableStateOf(0) }
     var camUri by rememberSaveable { mutableStateOf<Uri?>(null) }
 
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted = hasAccess() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { vm.addSelected(it) }
     val docs = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.addSelected(it) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         if (ok) camUri?.let { vm.addSelected(listOf(it)) }
+    }
+
+    /** Launching can throw when the device has no app for the request (no camera app, no file picker...). */
+    fun launchSafely(what: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: ActivityNotFoundException) {
+            Log.w("PixliSelect", "No activity for $what", e)
+            vm.reportError("No app found to $what")
+        } catch (e: SecurityException) {
+            Log.w("PixliSelect", "Not allowed to $what", e)
+            vm.reportError("Not allowed to $what")
+        }
     }
 
     LaunchedEffect(granted) {
@@ -104,18 +130,34 @@ fun SelectScreen(vm: MainViewModel, mode: Mode) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Text("Allow access to show your photos here.", textAlign = TextAlign.Center)
+                        Text("Allow access to show your photos here, or use the system photo picker (no permission needed).", textAlign = TextAlign.Center)
                         Spacer(Modifier.height(16.dp))
-                        Button(onClick = { permLauncher.launch(permission) }) { Text("Allow access") }
+                        Button(onClick = { launchSafely("request photo access") { permLauncher.launch(permissions) } }) { Text("Allow access") }
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = {
-                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            launchSafely("pick photos") {
+                                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }
                         }) { Text("Use photo picker instead") }
+                    }
+                } else if (gallery.isEmpty()) {
+                    Column(
+                        Modifier.fillMaxSize().padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("No photos found. You can also use the photo picker.", textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        OutlinedButton(onClick = {
+                            launchSafely("pick photos") {
+                                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }
+                        }) { Text("Open photo picker") }
                     }
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
+                        contentPadding = PaddingValues(6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -140,15 +182,17 @@ fun SelectScreen(vm: MainViewModel, mode: Mode) {
                 }
 
                 1 -> CenterAction(Icons.Filled.CameraAlt, "Take a new photo", "Open camera") {
-                    val dir = File(ctx.cacheDir, "camera").apply { mkdirs() }
-                    val f = File(dir, "IMG_${System.currentTimeMillis()}.jpg")
-                    val u = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
-                    camUri = u
-                    camera.launch(u)
+                    launchSafely("take a photo") {
+                        val dir = File(ctx.cacheDir, "camera").apply { mkdirs() }
+                        val f = File(dir, "IMG_${System.currentTimeMillis()}.jpg")
+                        val u = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+                        camUri = u
+                        camera.launch(u)
+                    }
                 }
 
                 else -> CenterAction(Icons.Filled.Description, "Pick images from Files or other apps", "Browse files") {
-                    docs.launch(arrayOf("image/*"))
+                    launchSafely("browse files") { docs.launch(arrayOf("image/*")) }
                 }
             }
         }
@@ -160,7 +204,7 @@ fun SelectScreen(vm: MainViewModel, mode: Mode) {
             Text("${vm.selected.size} selected", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton(
                 onClick = { vm.confirmSelection(mode) },
-                enabled = vm.selected.isNotEmpty(),
+                enabled = vm.selected.isNotEmpty() && !vm.busy,
                 colors = ButtonDefaults.textButtonColors(contentColor = Color.White, disabledContentColor = Color.White.copy(alpha = 0.5f))
             ) {
                 Text("Next", fontWeight = FontWeight.SemiBold)

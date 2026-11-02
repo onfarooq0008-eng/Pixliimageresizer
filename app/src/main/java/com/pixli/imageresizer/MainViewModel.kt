@@ -3,6 +3,7 @@ package com.pixli.imageresizer
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -11,14 +12,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
+    private companion object { const val TAG = "PixliVM" }
+
     private val ctx: Context get() = getApplication<Application>()
     private val sp = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    // ---- ads: owned here so they survive rotation and never hold an Activity ----
+    val interstitials = InterstitialManager(app)
+    val nativeHome = NativeAdSlot(app)
+    val nativeSaved = NativeAdSlot(app)
 
     // ---- navigation (tiny back stack) ----
     val stack = mutableStateListOf<Screen>(Screen.Home)
@@ -46,80 +57,161 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- shared UI state ----
     var message by mutableStateOf<String?>(null)
-    var busy by mutableStateOf(false)
-    var progress by mutableStateOf("")
+    var busy by mutableStateOf(false); private set
+    var progress by mutableStateOf(""); private set
+    private var progressDone by mutableIntStateOf(0)
+    private var progressTotal by mutableIntStateOf(0)
+    val progressFraction: Float? get() = if (progressTotal > 0) progressDone.toFloat() / progressTotal else null
 
     val selected = mutableStateListOf<Uri>()
-    var images by mutableStateOf<List<ImageInfo>>(emptyList()); private set
+    /** The image(s) being worked on: one for Compress/Resize, any number for Batch. */
+    val images = mutableStateListOf<ImageInfo>()
 
     var result by mutableStateOf<ProcessedImage?>(null); private set
+    private var resultSaved = false
     private var lastParams = Params(null, null, 70)
     private var lastTag = "compressed"
 
+    // ---- batch state (keyed by source Uri so removing/adding images never shifts results) ----
     var batchTab by mutableStateOf(Mode.COMPRESS); private set
-    val batchChecked = mutableStateListOf<Boolean>()
-    val batchResults = mutableStateMapOf<Int, ProcessedImage>()
-    var batchSaved by mutableStateOf(false); private set
+    val batchChecked = mutableStateMapOf<Uri, Boolean>()
+    val batchResults = mutableStateMapOf<Uri, ProcessedImage>()
+    val batchFailures = mutableStateMapOf<Uri, String>()
+    private val batchSavedKeys = mutableStateMapOf<Uri, Boolean>()
+    var batchRunning by mutableStateOf(false); private set
+    private var batchJob: Job? = null
+
+    val batchAllSaved: Boolean get() = batchResults.isNotEmpty() && batchResults.keys.all { batchSavedKeys[it] == true }
 
     var saved by mutableStateOf<List<SavedItem>>(emptyList()); private set
 
     /** Incremented after every successful save; the UI uses it to occasionally show an interstitial ad. */
     var saveEvents by mutableIntStateOf(0); private set
 
-    /** Lives as long as the ViewModel, so rotating the screen does not reload or recount ads. */
-    val interstitials = InterstitialManager(app)
-
     init {
+        deleteCache()
+    }
+
+    override fun onCleared() {
+        batchJob?.cancel()
+        interstitials.destroy()
+        nativeHome.discard()
+        nativeSaved.discard()
+        deleteCache()
+        super.onCleared()
+    }
+
+    private fun deleteCache() {
         File(ctx.cacheDir, "out").deleteRecursively()
         File(ctx.cacheDir, "camera").deleteRecursively()
     }
 
-    // ---- selection ----
+    private fun discard(r: ProcessedImage?) {
+        r?.file?.parentFile?.deleteRecursively()
+    }
+
+    // ───────────── selection ─────────────
+
     fun startFlow(mode: Mode) { selected.clear(); push(Screen.Select(mode)) }
+    fun startAddMore() { selected.clear(); push(Screen.Select(Mode.BATCH)) }
     fun toggle(uri: Uri) { if (!selected.remove(uri)) selected.add(uri) }
     fun addSelected(uris: List<Uri>) { uris.forEach { if (it !in selected) selected.add(it) } }
 
     fun confirmSelection(mode: Mode) {
-        if (selected.isEmpty()) return
-        val uris = selected.toList()
+        if (busy || selected.isEmpty()) return
+        val addingToBatch = stack.any { it is Screen.Batch }
+        val known = images.map { it.uri }.toSet()
+        val requested = selected.toList().distinct()
+        val fresh = if (addingToBatch) requested.filter { it !in known } else requested
+        val duplicates = requested.size - fresh.size
+        if (fresh.isEmpty()) {
+            message = "Those images are already in the batch"
+            if (addingToBatch) while (stack.last() !is Screen.Batch) pop()
+            return
+        }
         viewModelScope.launch {
             busy = true
-            val infos = withContext(Dispatchers.IO) {
-                uris.mapNotNull { runCatching { ImageProcessor.queryInfo(ctx, it) }.getOrNull() }
+            progress = ""
+            val infos = ArrayList<ImageInfo>(fresh.size)
+            var unreadable = 0
+            try {
+                withContext(Dispatchers.IO) {
+                    for (uri in fresh) {
+                        try {
+                            infos += ImageProcessor.queryInfo(ctx, uri)
+                        } catch (e: ImageProcessingException) {
+                            Log.w(TAG, "Skipping unreadable image $uri: ${e.message}")
+                            unreadable++
+                        } catch (e: SecurityException) {
+                            Log.w(TAG, "No permission for $uri", e)
+                            unreadable++
+                        } catch (e: java.io.IOException) {
+                            Log.w(TAG, "Cannot read $uri", e)
+                            unreadable++
+                        }
+                    }
+                }
+            } finally {
+                busy = false
             }
-            busy = false
             if (infos.isEmpty()) { message = "Couldn't open the selected images"; return@launch }
-            if (infos.size < uris.size) message = "Some images couldn't be opened"
-            images = infos
-            resetBatch()
-            when {
-                stack.any { it is Screen.Batch } -> while (stack.last() !is Screen.Batch) pop()
-                infos.size > 1 || mode == Mode.BATCH -> {
+            val notes = buildList {
+                if (unreadable > 0) add("$unreadable couldn't be opened")
+                if (duplicates > 0) add("$duplicates already added")
+            }
+            if (notes.isNotEmpty()) message = notes.joinToString(" · ")
+
+            if (addingToBatch) {
+                images.addAll(infos)
+                infos.forEach { batchChecked[it.uri] = true }
+                while (stack.last() !is Screen.Batch) pop()
+            } else {
+                clearBatchOutputs()
+                images.clear()
+                images.addAll(infos)
+                batchChecked.clear()
+                infos.forEach { batchChecked[it.uri] = true }
+                if (infos.size > 1 || mode == Mode.BATCH) {
                     batchTab = if (mode == Mode.RESIZE) Mode.RESIZE else Mode.COMPRESS
                     push(Screen.Batch)
+                } else if (mode == Mode.RESIZE) {
+                    push(Screen.Resize)
+                } else {
+                    push(Screen.Compress)
                 }
-                mode == Mode.RESIZE -> push(Screen.Resize)
-                else -> push(Screen.Compress)
             }
         }
     }
 
-    // ---- single image ----
+    // ───────────── single image ─────────────
+
     fun processSingle(tw: Int?, th: Int?, quality: Int, tag: String, fmt: OutFormat = format) {
         val src = images.firstOrNull() ?: return
+        if (busy) return
         viewModelScope.launch {
             busy = true
-            val r = runCatching {
-                withContext(Dispatchers.Default) { ImageProcessor.process(ctx, src, quality, fmt, tw, th, tag) }
-            }
-            busy = false
-            r.onSuccess {
-                result?.file?.parentFile?.deleteRecursively()
-                result = it
+            progress = ""
+            try {
+                val r = withContext(Dispatchers.Default) { ImageProcessor.process(ctx, src, quality, fmt, tw, th, tag) }
+                discard(result)
+                result = r
+                resultSaved = false
                 lastParams = Params(tw, th, quality)
                 lastTag = tag
+                if (r.downscaledForMemory) {
+                    message = "Low memory: the image was processed at a smaller size (${r.width} × ${r.height})."
+                }
                 if (current !is Screen.Edit) push(Screen.Edit)
-            }.onFailure { message = "Couldn't process image: ${it.message}" }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ImageProcessingException) {
+                message = e.message ?: "Couldn't process the image"
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected processing error", e)
+                message = "Couldn't process the image: ${e.message}"
+            } finally {
+                busy = false
+            }
         }
     }
 
@@ -130,91 +222,179 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveCurrent() {
         val r = result ?: return
+        if (busy) return
+        if (resultSaved) { message = "Already saved to Pictures/${ImageProcessor.FOLDER}"; return }
         viewModelScope.launch {
             busy = true
-            val uri = withContext(Dispatchers.IO) { ImageProcessor.saveToGallery(ctx, r, keepDate) }
-            busy = false
-            message = if (uri != null) "Saved to Pictures/${ImageProcessor.FOLDER}" else "Couldn't save the image"
-            if (uri != null) saveEvents++
+            progress = ""
+            try {
+                when (val res = withContext(Dispatchers.IO) { ImageProcessor.saveToGallery(ctx, r, keepDate) }) {
+                    is SaveResult.Ok -> {
+                        resultSaved = true
+                        message = "Saved to Pictures/${ImageProcessor.FOLDER}"
+                        saveEvents++
+                    }
+                    is SaveResult.Failed -> message = "Couldn't save: ${res.reason}"
+                }
+            } finally {
+                busy = false
+            }
         }
     }
 
     fun exportTo(uri: Uri) {
         val r = result ?: return
         viewModelScope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    ctx.contentResolver.openOutputStream(uri)?.use { out -> r.file.inputStream().use { it.copyTo(out) } }
-                }.isSuccess
+            message = when (val res = withContext(Dispatchers.IO) { ImageProcessor.exportTo(ctx, r, uri) }) {
+                is SaveResult.Ok -> "Saved"
+                is SaveResult.Failed -> "Couldn't save: ${res.reason}"
             }
-            message = if (ok) "Saved" else "Couldn't save the file"
         }
     }
 
-    // ---- batch ----
-    private fun resetBatch() {
-        batchChecked.clear()
-        repeat(images.size) { batchChecked.add(true) }
+    // ───────────── batch ─────────────
+
+    private fun clearBatchOutputs() {
+        batchResults.values.forEach { discard(it) }
         batchResults.clear()
-        batchSaved = false
+        batchFailures.clear()
+        batchSavedKeys.clear()
     }
 
-    fun updateBatchTab(m: Mode) { batchTab = m; batchResults.clear(); batchSaved = false }
+    fun updateBatchTab(m: Mode) {
+        if (batchRunning || busy) return
+        batchTab = m
+        clearBatchOutputs()
+    }
+
+    fun removeImage(uri: Uri) {
+        if (batchRunning || busy) return
+        images.removeAll { it.uri == uri }
+        batchChecked.remove(uri)
+        batchFailures.remove(uri)
+        batchSavedKeys.remove(uri)
+        discard(batchResults.remove(uri))
+    }
+
+    fun toggleChecked(uri: Uri) {
+        if (batchRunning) return
+        batchChecked[uri] = !(batchChecked[uri] ?: true)
+    }
+
+    fun cancelBatch() { batchJob?.cancel() }
 
     fun runBatch(resize: Boolean, quality: Int, preset: SizePreset) {
-        val idx = images.indices.filter { batchChecked.getOrElse(it) { false } }
-        if (idx.isEmpty()) { message = "Select at least one image"; return }
+        if (batchRunning || busy) return
+        val targets = images.filter { batchChecked[it.uri] != false }
+        if (targets.isEmpty()) { message = "Select at least one image"; return }
         val fmt = format
-        val q = defaultQuality
-        viewModelScope.launch {
-            busy = true
-            batchResults.clear()
-            batchSaved = false
+        val resizeQuality = defaultQuality
+
+        targets.forEach { discard(batchResults.remove(it.uri)); batchFailures.remove(it.uri); batchSavedKeys.remove(it.uri) }
+        batchRunning = true
+        progressDone = 0
+        progressTotal = targets.size
+        progress = "Processing 1 of ${targets.size}…"
+
+        batchJob = viewModelScope.launch {
+            var ok = 0
             var failed = 0
-            idx.forEachIndexed { n, i ->
-                progress = "Processing ${n + 1} of ${idx.size}…"
-                val src = images[i]
-                val r = runCatching {
-                    withContext(Dispatchers.Default) {
-                        if (resize) {
-                            val (w, h) = ImageProcessor.fitDims(src, preset)
-                            ImageProcessor.process(ctx, src, q, fmt, w, h, "resized")
-                        } else {
-                            ImageProcessor.process(ctx, src, quality, fmt, null, null, "compressed")
+            var cancelled = false
+            try {
+                for (src in targets) {
+                    ensureActive()
+                    progress = "Processing ${progressDone + 1} of ${targets.size}…"
+                    try {
+                        val r = withContext(Dispatchers.Default) {
+                            if (resize) {
+                                val (w, h) = ImageProcessor.fitDims(src, preset)
+                                ImageProcessor.process(ctx, src, resizeQuality, fmt, w, h, "resized")
+                            } else {
+                                ImageProcessor.process(ctx, src, quality, fmt, null, null, "compressed")
+                            }
                         }
+                        batchResults[src.uri] = r
+                        ok++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Batch item failed: ${src.name}", e)
+                        batchFailures[src.uri] = e.message ?: "Failed"
+                        failed++
                     }
+                    progressDone++
                 }
-                r.onSuccess { batchResults[i] = it }.onFailure { failed++ }
+            } catch (e: CancellationException) {
+                cancelled = true
+                throw e
+            } finally {
+                batchRunning = false
+                progress = ""
+                progressDone = 0
+                progressTotal = 0
+                message = when {
+                    cancelled -> "Cancelled · $ok processed" + if (failed > 0) ", $failed failed" else ""
+                    failed > 0 -> "$ok processed · $failed failed"
+                    else -> "$ok processed"
+                }
             }
-            busy = false
-            progress = ""
-            if (failed > 0) message = "$failed image(s) failed"
         }
     }
 
     fun saveAll() {
-        val items = batchResults.values.toList()
+        if (batchRunning || busy) return
+        val pending = batchResults.entries.filter { batchSavedKeys[it.key] != true }.map { it.key to it.value }
+        if (pending.isEmpty()) { message = "Everything is already saved"; return }
         viewModelScope.launch {
             busy = true
-            progress = "Saving…"
-            val ok = withContext(Dispatchers.IO) { items.count { ImageProcessor.saveToGallery(ctx, it, keepDate) != null } }
-            busy = false
-            progress = ""
-            batchSaved = ok > 0
-            message = "Saved $ok image(s) to Pictures/${ImageProcessor.FOLDER}"
+            progressDone = 0
+            progressTotal = pending.size
+            var ok = 0
+            var failed = 0
+            try {
+                for ((uri, r) in pending) {
+                    progress = "Saving ${progressDone + 1} of ${pending.size}…"
+                    val res = withContext(Dispatchers.IO) { ImageProcessor.saveToGallery(ctx, r, keepDate) }
+                    if (res is SaveResult.Ok) {
+                        batchSavedKeys[uri] = true
+                        ok++
+                    } else {
+                        Log.w(TAG, "Batch save failed for ${r.displayName}: $res")
+                        failed++
+                    }
+                    progressDone++
+                }
+            } finally {
+                busy = false
+                progress = ""
+                progressDone = 0
+                progressTotal = 0
+            }
+            message = "Saved $ok to Pictures/${ImageProcessor.FOLDER}" + if (failed > 0) " · $failed failed" else ""
             if (ok > 0) saveEvents++
         }
     }
 
-    // ---- saved files ----
+    // ───────────── saved files ─────────────
+
     fun refreshSaved() {
         viewModelScope.launch { saved = withContext(Dispatchers.IO) { ImageProcessor.loadSaved(ctx) } }
     }
 
     fun deleteSaved(item: SavedItem) {
         viewModelScope.launch {
-            val ok = withContext(Dispatchers.IO) { runCatching { ctx.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false) }
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    ctx.contentResolver.delete(item.uri, null, null) > 0
+                } catch (e: SecurityException) {
+                    // Android only lets an app delete media it created itself (not after a reinstall).
+                    Log.w(TAG, "Delete not permitted for ${item.uri}", e)
+                    false
+                }
+            }
             if (ok) saved = saved.filter { it.uri != item.uri } else message = "Couldn't delete that file"
         }
     }
+
+    fun reportError(text: String) { message = text }
 }

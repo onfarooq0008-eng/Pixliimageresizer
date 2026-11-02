@@ -1,7 +1,10 @@
 package com.pixli.imageresizer
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -25,9 +29,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -77,7 +83,7 @@ fun ImagePreview(model: Any?, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun BusyOverlay(visible: Boolean, text: String) {
+fun BusyOverlay(visible: Boolean, text: String, fraction: Float? = null, onCancel: (() -> Unit)? = null) {
     if (!visible) return
     Box(
         Modifier.fillMaxSize().background(Color(0x66000000)).clickable(
@@ -87,10 +93,18 @@ fun BusyOverlay(visible: Boolean, text: String) {
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator()
+                if (fraction != null) {
+                    LinearProgressIndicator(progress = { fraction }, modifier = Modifier.width(220.dp))
+                } else {
+                    CircularProgressIndicator()
+                }
                 if (text.isNotEmpty()) {
                     Spacer(Modifier.height(14.dp))
                     Text(text, color = Ink)
+                }
+                if (onCancel != null) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onCancel) { Text("Cancel") }
                 }
             }
         }
@@ -137,14 +151,27 @@ fun PresetChip(label: String, hint: String, selected: Boolean, modifier: Modifie
     }
 }
 
-fun shareFile(ctx: Context, file: File, mime: String) {
-    val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
-    val i = Intent(Intent.ACTION_SEND).apply {
+fun shareFile(ctx: Context, file: File, mime: String, onError: (String) -> Unit) {
+    try {
+        shareUri(ctx, FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file), mime, onError)
+    } catch (e: IllegalArgumentException) {
+        Log.w("PixliShare", "FileProvider could not expose $file", e)
+        onError("Couldn't share this file")
+    }
+}
+
+fun shareUri(ctx: Context, uri: Uri, mime: String, onError: (String) -> Unit) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
         type = mime
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    ctx.startActivity(Intent.createChooser(i, null))
+    try {
+        ctx.startActivity(Intent.createChooser(intent, null))
+    } catch (e: ActivityNotFoundException) {
+        Log.w("PixliShare", "No share target", e)
+        onError("No app available to share with")
+    }
 }
 
 @Composable

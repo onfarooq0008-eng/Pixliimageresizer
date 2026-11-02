@@ -1,5 +1,7 @@
 package com.pixli.imageresizer
 
+import android.content.ActivityNotFoundException
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -17,7 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -45,14 +48,17 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -69,7 +75,7 @@ import kotlin.math.roundToInt
 @Composable
 fun CompressScreen(vm: MainViewModel) {
     val img = vm.images.firstOrNull() ?: return
-    var quality by remember { mutableIntStateOf(vm.defaultQuality) }
+    var quality by rememberSaveable { mutableStateOf(vm.defaultQuality) }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Bar("Compress Image") { vm.pop() }
@@ -109,7 +115,7 @@ private enum class SizeChoice { CUSTOM, SMALL, MEDIUM, LARGE }
 @Composable
 fun ResizeScreen(vm: MainViewModel) {
     val img = vm.images.firstOrNull() ?: return
-    var choice by remember {
+    var choice by rememberSaveable {
         mutableStateOf(
             when (vm.defaultSize) {
                 SizePreset.SMALL -> SizeChoice.SMALL
@@ -118,15 +124,15 @@ fun ResizeScreen(vm: MainViewModel) {
             }
         )
     }
-    var w by remember { mutableStateOf(img.width.toString()) }
-    var h by remember { mutableStateOf(img.height.toString()) }
-    var lock by remember { mutableStateOf(true) }
+    var w by rememberSaveable { mutableStateOf(img.width.toString()) }
+    var h by rememberSaveable { mutableStateOf(img.height.toString()) }
+    var lock by rememberSaveable { mutableStateOf(true) }
 
     fun target(): Pair<Int, Int>? = when (choice) {
         SizeChoice.CUSTOM -> {
             val a = w.toIntOrNull()
             val b = h.toIntOrNull()
-            if (a != null && b != null && a in 1..12000 && b in 1..12000 && a.toLong() * b <= 30_000_000L) a to b else null
+            if (a != null && b != null && ImageMath.isWithinLimits(a, b)) a to b else null
         }
         SizeChoice.SMALL -> ImageProcessor.fitDims(img, SizePreset.SMALL)
         SizeChoice.MEDIUM -> ImageProcessor.fitDims(img, SizePreset.MEDIUM)
@@ -159,7 +165,7 @@ fun ResizeScreen(vm: MainViewModel) {
                                 w = d
                                 choice = SizeChoice.CUSTOM
                                 if (lock) d.toIntOrNull()?.let {
-                                    h = (it * img.height.toDouble() / img.width).roundToInt().coerceAtLeast(1).toString()
+                                    h = ImageMath.heightForWidth(img.width, img.height, it).toString()
                                 }
                             },
                             singleLine = true,
@@ -174,7 +180,7 @@ fun ResizeScreen(vm: MainViewModel) {
                                 h = d
                                 choice = SizeChoice.CUSTOM
                                 if (lock) d.toIntOrNull()?.let {
-                                    w = (it * img.width.toDouble() / img.height).roundToInt().coerceAtLeast(1).toString()
+                                    w = ImageMath.widthForHeight(img.width, img.height, it).toString()
                                 }
                             },
                             singleLine = true,
@@ -264,8 +270,15 @@ fun EditScreen(vm: MainViewModel) {
             DetailRow("Format") { Text(r.format.label, fontSize = 13.sp) }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ActionButton(Icons.Filled.Share, "Share", Modifier.weight(1f)) { shareFile(ctx, r.file, r.format.mime) }
-                ActionButton(Icons.Filled.Save, "Save as…", Modifier.weight(1f)) { saveAs.launch(r.displayName) }
+                ActionButton(Icons.Filled.Share, "Share", Modifier.weight(1f)) { shareFile(ctx, r.file, r.format.mime, vm::reportError) }
+                ActionButton(Icons.Filled.Save, "Save as…", Modifier.weight(1f)) {
+                    try {
+                        saveAs.launch(r.displayName)
+                    } catch (e: ActivityNotFoundException) {
+                        Log.w("PixliEdit", "No document picker", e)
+                        vm.reportError("No app found to choose a save location")
+                    }
+                }
                 Box(Modifier.weight(1f)) {
                     ActionButton(Icons.Filled.MoreHoriz, "More", Modifier.fillMaxWidth()) { menu = true }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -302,10 +315,15 @@ private fun ActionButton(icon: ImageVector, label: String, modifier: Modifier, o
 
 @Composable
 fun BatchScreen(vm: MainViewModel) {
-    var quality by remember { mutableIntStateOf(vm.defaultQuality) }
-    var preset by remember { mutableStateOf(vm.defaultSize) }
+    var quality by rememberSaveable { mutableStateOf(vm.defaultQuality) }
+    var preset by rememberSaveable { mutableStateOf(vm.defaultSize) }
     val resize = vm.batchTab == Mode.RESIZE
     val hasResults = vm.batchResults.isNotEmpty()
+    val okCount = vm.batchResults.size
+    val failCount = vm.batchFailures.size
+
+    // Removing the last image leaves nothing to process.
+    LaunchedEffect(vm.images.size) { if (vm.images.isEmpty()) vm.pop() }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Bar("Batch Process") { vm.pop() }
@@ -314,17 +332,24 @@ fun BatchScreen(vm: MainViewModel) {
             Tab(selected = resize, onClick = { vm.updateBatchTab(Mode.RESIZE) }, text = { Text("Resize") })
         }
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${vm.images.size} images selected", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            TextButton(onClick = { vm.push(Screen.Select(Mode.BATCH)) }) { Text("+ Add More") }
+            Text("${vm.images.size} images", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { vm.startAddMore() }) { Text("+ Add More") }
+        }
+        if (hasResults || failCount > 0) {
+            Text(
+                "✓ $okCount done" + if (failCount > 0) "  ·  ✗ $failCount failed" else "",
+                color = if (failCount > 0) Color(0xFFC0392B) else Color(0xFF1B8A4B),
+                fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
         }
         LazyColumn(Modifier.weight(1f)) {
-            itemsIndexed(vm.images) { i, img ->
-                val res = vm.batchResults[i]
-                val checked = vm.batchChecked.getOrElse(i) { true }
+            items(vm.images, key = { it.uri.toString() }) { img ->
+                val res = vm.batchResults[img.uri]
+                val failure = vm.batchFailures[img.uri]
+                val checked = vm.batchChecked[img.uri] != false
                 Row(
-                    Modifier.fillMaxWidth().clickable {
-                        if (i < vm.batchChecked.size) vm.batchChecked[i] = !checked
-                    }.padding(horizontal = 16.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().clickable { vm.toggleChecked(img.uri) }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(
@@ -333,28 +358,31 @@ fun BatchScreen(vm: MainViewModel) {
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(img.name, maxLines = 1, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        val sizeText = when {
-                            res != null -> "${img.sizeBytes.fmtSize()} → ${res.sizeBytes.fmtSize()}"
-                            vm.showSize -> img.sizeBytes.fmtSize()
-                            else -> "${img.width} × ${img.height}"
+                        Text(img.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        when {
+                            failure != null -> Text(failure, color = Color(0xFFC0392B), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            res != null -> MutedText("${img.sizeBytes.fmtSize()} → ${res.sizeBytes.fmtSize()}  (${res.width} × ${res.height})")
+                            vm.showSize -> MutedText("${img.sizeBytes.fmtSize()}  ·  ${img.width} × ${img.height}")
+                            else -> MutedText("${img.width} × ${img.height}")
                         }
-                        MutedText(sizeText)
                     }
                     Box(
                         Modifier.size(22.dp).clip(CircleShape).background(if (checked) Blue else Line),
                         contentAlignment = Alignment.Center
                     ) { if (checked) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(14.dp)) }
+                    IconButton(onClick = { vm.removeImage(img.uri) }) {
+                        Icon(Icons.Filled.Close, "Remove from batch", tint = Muted)
+                    }
                 }
                 HorizontalDivider(color = Line)
             }
         }
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (resize) {
-                Text("Resize to (fits inside, keeps aspect ratio)", fontWeight = FontWeight.Medium)
+                Text("Resize to (fits inside, keeps aspect ratio, never upscales)", fontWeight = FontWeight.Medium, fontSize = 13.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SizePreset.entries.forEach { p ->
-                        PresetChip(p.label, p.hint, preset == p, Modifier.weight(1f)) { preset = p; vm.batchResults.clear() }
+                        PresetChip(p.label, p.hint, preset == p, Modifier.weight(1f)) { preset = p }
                     }
                 }
             } else {
@@ -366,8 +394,8 @@ fun BatchScreen(vm: MainViewModel) {
             }
             if (hasResults) {
                 PrimaryButton(
-                    if (vm.batchSaved) "Saved ✓" else "Save All to Gallery",
-                    enabled = !vm.batchSaved
+                    if (vm.batchAllSaved) "Saved ✓" else "Save All to Gallery",
+                    enabled = !vm.batchAllSaved
                 ) { vm.saveAll() }
                 OutlinedButton(
                     onClick = { vm.runBatch(resize, quality, preset) },

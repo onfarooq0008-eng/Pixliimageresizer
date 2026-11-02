@@ -1,6 +1,5 @@
 package com.pixli.imageresizer
 
-import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -86,7 +86,7 @@ fun HomeScreen(vm: MainViewModel) {
                 ToolTile(Icons.Filled.Collections, "Batch Process", "Compress & resize multiple images", Modifier.weight(1f)) { vm.startFlow(Mode.BATCH) }
                 ToolTile(Icons.Filled.FolderOpen, "My Files", "View saved images", Modifier.weight(1f)) { vm.goRoot(Screen.Saved) }
             }
-            NativeAdCard()
+            NativeAdCard(vm.nativeHome)
         }
     }
 }
@@ -123,9 +123,13 @@ fun SavedScreen(vm: MainViewModel) {
     Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding()) {
         Text("Saved", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
         if (vm.saved.isEmpty()) {
-            Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 Icon(Icons.Filled.FolderOpen, null, tint = Muted, modifier = Modifier.size(48.dp))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.height(8.dp))
                 MutedText("Images you save will appear here (Pictures/${ImageProcessor.FOLDER}).")
             }
         } else {
@@ -141,20 +145,15 @@ fun SavedScreen(vm: MainViewModel) {
                             Text(item.name, maxLines = 1, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             if (vm.showSize) MutedText(item.sizeBytes.fmtSize())
                         }
-                        IconButton(onClick = {
-                            val i = Intent(Intent.ACTION_SEND).apply {
-                                type = "image/*"
-                                putExtra(Intent.EXTRA_STREAM, item.uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            ctx.startActivity(Intent.createChooser(i, null))
-                        }) { Icon(Icons.Filled.Share, "Share", tint = Blue) }
+                        IconButton(onClick = { shareUri(ctx, item.uri, "image/*", vm::reportError) }) {
+                            Icon(Icons.Filled.Share, "Share", tint = Blue)
+                        }
                         IconButton(onClick = { vm.deleteSaved(item) }) { Icon(Icons.Filled.Delete, "Delete", tint = Muted) }
                     }
                     HorizontalDivider(color = Line)
                 }
             }
         }
-        NativeAdCard()
+        NativeAdCard(vm.nativeSaved)
     }
 }

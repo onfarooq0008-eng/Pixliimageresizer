@@ -4,7 +4,8 @@ Jetpack Compose app that follows the 7-screen design: Home, Gallery Selection, C
 Edit & Save, Batch Process and Settings. Images are processed on-device and never uploaded. Ads: Yandex Mobile Ads SDK 8.6.0.
 
 - Package: `com.pixli.imageresizer` · minSdk 29 · targetSdk 36
-- Kotlin 2.4.10, Compose BOM 2026.09.00, Coil 3.6.3 (checked against current docs)
+- AGP 9.1.0 (built-in Kotlin) + Gradle 9.3.1, Kotlin 2.4.10, Compose BOM 2026.09.00, Coil 3.6.3, Yandex Ads 8.6.0.
+  Compose 1.12 / lifecycle 2.11 / Coil 3.6 require AGP 9.1+ and compileSdk 37, so keep those four in step.
 - Saves to `Pictures/Pixli` through MediaStore (no storage permission needed to save)
 
 ## Build with GitHub (no PC needed)
@@ -50,6 +51,10 @@ If you lose it you cannot update the app on Google Play.
 ## Notes
 
 - `versionCode` = GitHub run number, so every CI build has a higher code automatically.
-- The workflow uses Gradle 8.14.3 directly (no wrapper files needed). To add a wrapper:
-  `gradle wrapper --gradle-version 8.14.3`
+- The workflow installs Gradle 9.3.1 itself (no wrapper files needed). To add a wrapper:
+  `gradle wrapper --gradle-version 9.3.1`
 - Play Store icon (512×512): `store/play_store_icon_512.png`
+
+## Audit
+See `docs/AUDIT_REPORT.md` for the full bug-fix report, what was and was not verified, and the Play Store checklist.
+Unit tests run in CI before the debug APK is built (`gradle :app:testDebugUnitTest`).

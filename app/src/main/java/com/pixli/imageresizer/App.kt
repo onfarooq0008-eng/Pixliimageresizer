@@ -74,7 +74,12 @@ fun App(vm: MainViewModel) {
                 Screen.Edit -> EditScreen(vm)
                 Screen.Batch -> BatchScreen(vm)
             }
-            BusyOverlay(vm.busy, vm.progress)
+            BusyOverlay(
+                visible = vm.busy || vm.batchRunning,
+                text = vm.progress,
+                fraction = vm.progressFraction,
+                onCancel = if (vm.batchRunning) vm::cancelBatch else null
+            )
         }
     }
 }
