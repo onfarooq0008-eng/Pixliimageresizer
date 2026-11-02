@@ -22,11 +22,14 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun App(vm: MainViewModel) {
@@ -34,11 +37,13 @@ fun App(vm: MainViewModel) {
     val root = screen is Screen.Home || screen is Screen.Tools || screen is Screen.Saved || screen is Screen.Settings
     val snack = remember { SnackbarHostState() }
     val activity = LocalActivity.current
-    val appContext = LocalContext.current.applicationContext
-    val interstitials = remember { InterstitialManager(appContext) }
+    var handledSaves by rememberSaveable { mutableStateOf(vm.saveEvents) }
 
     LaunchedEffect(vm.saveEvents) {
-        if (vm.saveEvents > 0) activity?.let { interstitials.onSaved(it) }
+        if (vm.saveEvents > handledSaves) {
+            handledSaves = vm.saveEvents
+            activity?.let { vm.interstitials.onSaved(it, vm.saveEvents) }
+        }
     }
 
     BackHandler(enabled = vm.stack.size > 1) { vm.pop() }

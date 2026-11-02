@@ -1,3 +1,5 @@
 -dontwarn kotlin.**
 -dontwarn kotlinx.**
+-dontwarn com.yandex.**
+-dontwarn javax.annotation.**
 -keep class androidx.exifinterface.** { *; }

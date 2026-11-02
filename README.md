@@ -39,17 +39,17 @@ If you lose it you cannot update the app on Google Play.
 
 ## Yandex ads
 
-- Native ad card at the bottom of Home and Saved (no banner); an interstitial after every 3rd successful save.
+- Native ad card at the bottom of Home and Saved (no banner); an interstitial after saves (see below).
 - Debug builds always use Yandex demo ad units (`demo-native-content-yandex`, `demo-interstitial-yandex`).
 - Release builds use your real ad units, set as defaults in `app/build.gradle.kts`:
   native `R-M-20295158-1`, interstitial `R-M-20295158-2`.
   Optional repo secrets `YANDEX_NATIVE_ID` / `YANDEX_INTERSTITIAL_ID` override them.
-- Adjust the interstitial frequency in `Ads.kt` (`EVERY_N_SAVES`).
+- Interstitial: debug builds show it after every save (easy testing); release builds after every 3rd save. Change it in `Ads.kt` (`everyN`).
 - Before publishing, update your Google Play Data safety form and privacy policy for ads.
 
 ## Notes
 
 - `versionCode` = GitHub run number, so every CI build has a higher code automatically.
-- The workflow uses Gradle 9.3.1 directly (no wrapper files needed). To add a wrapper:
-  `gradle wrapper --gradle-version 9.3.1`
+- The workflow uses Gradle 8.14.3 directly (no wrapper files needed). To add a wrapper:
+  `gradle wrapper --gradle-version 8.14.3`
 - Play Store icon (512×512): `store/play_store_icon_512.png`

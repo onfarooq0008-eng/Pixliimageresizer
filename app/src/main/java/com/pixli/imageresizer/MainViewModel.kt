@@ -66,6 +66,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Incremented after every successful save; the UI uses it to occasionally show an interstitial ad. */
     var saveEvents by mutableIntStateOf(0); private set
 
+    /** Lives as long as the ViewModel, so rotating the screen does not reload or recount ads. */
+    val interstitials = InterstitialManager(app)
+
     init {
         File(ctx.cacheDir, "out").deleteRecursively()
         File(ctx.cacheDir, "camera").deleteRecursively()

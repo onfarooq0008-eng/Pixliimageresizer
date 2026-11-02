@@ -126,7 +126,7 @@ fun ResizeScreen(vm: MainViewModel) {
         SizeChoice.CUSTOM -> {
             val a = w.toIntOrNull()
             val b = h.toIntOrNull()
-            if (a != null && b != null && a in 1..12000 && b in 1..12000) a to b else null
+            if (a != null && b != null && a in 1..12000 && b in 1..12000 && a.toLong() * b <= 30_000_000L) a to b else null
         }
         SizeChoice.SMALL -> ImageProcessor.fitDims(img, SizePreset.SMALL)
         SizeChoice.MEDIUM -> ImageProcessor.fitDims(img, SizePreset.MEDIUM)
@@ -190,10 +190,10 @@ fun ResizeScreen(vm: MainViewModel) {
                     ChoiceRow("Large", SizePreset.LARGE.hint, choice == SizeChoice.LARGE) { choice = SizeChoice.LARGE }
                 }
             }
-            target()?.let {
-                Spacer(Modifier.height(10.dp))
-                MutedText("Result: ${it.first} × ${it.second} px")
-            }
+            Spacer(Modifier.height(10.dp))
+            val t = target()
+            if (t != null) MutedText("Result: ${t.first} × ${t.second} px")
+            else MutedText("Enter a size up to 12000 px per side and 30 megapixels in total.")
         }
         PrimaryButton("Resize", Modifier.padding(16.dp), enabled = target() != null) {
             target()?.let { vm.processSingle(it.first, it.second, vm.defaultQuality, "resized") }

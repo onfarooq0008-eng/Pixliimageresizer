@@ -78,29 +78,35 @@ private fun bindNativeAd(view: NativeAdView, ad: NativeAd) {
     }
 }
 
-/** Preloads one interstitial and shows it after every [EVERY_N_SAVES]th successful save. */
+/**
+ * Preloads one interstitial and shows it every [everyN] successful saves
+ * (every save in debug builds so it is easy to test, every 3rd save in release builds).
+ */
 class InterstitialManager(context: Context) {
     private var ad: InterstitialAd? = null
-    private var saves = 0
-
+    private var loading = false
     private val loader = InterstitialAdLoader(context)
+    private val everyN: Int get() = if (BuildConfig.DEBUG) 1 else 3
 
     init { load() }
 
     private fun load() {
+        if (loading || ad != null) return
+        loading = true
         loader.loadAd(
             AdRequest.Builder(BuildConfig.INTERSTITIAL_ID).build(),
             object : InterstitialAdLoadListener {
-                override fun onAdLoaded(interstitialAd: InterstitialAd) { ad = interstitialAd }
-                override fun onAdFailedToLoad(adRequestError: AdRequestError) { ad = null }
+                override fun onAdLoaded(interstitialAd: InterstitialAd) { ad = interstitialAd; loading = false }
+                override fun onAdFailedToLoad(adRequestError: AdRequestError) { ad = null; loading = false }
             }
         )
     }
 
-    fun onSaved(activity: Activity) {
-        saves++
-        if (saves % EVERY_N_SAVES != 0) return
-        val current = ad ?: return
+    /** Called once after the [saveCount]-th successful save. */
+    fun onSaved(activity: Activity, saveCount: Int) {
+        if (saveCount % everyN != 0) return
+        val current = ad
+        if (current == null) { load(); return }   // not ready yet: try again for next time
         current.setAdEventListener(object : InterstitialAdEventListener {
             override fun onAdShown() {}
             override fun onAdFailedToShow(adError: AdError) { release() }
@@ -116,6 +122,4 @@ class InterstitialManager(context: Context) {
         ad = null
         load()
     }
-
-    private companion object { const val EVERY_N_SAVES = 3 }
 }
